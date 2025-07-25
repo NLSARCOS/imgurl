@@ -4,20 +4,10 @@ services:
   srgb-processor:
     build: .
     ports:
-      - "3001:3001"
-    environment:
-      - NODE_ENV=production
-      - PORT=3001
+      - "80:80"
     volumes:
-      # Persist processed images
-      - processed_images:/app/backend/processed
+      - ./processed:/var/www/html/processed
+      - ./uploads:/var/www/html/uploads
+    environment:
+      - APACHE_DOCUMENT_ROOT=/var/www/html
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-
-volumes:
-  processed_images:

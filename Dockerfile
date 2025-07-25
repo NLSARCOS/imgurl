@@ -1,55 +1,37 @@
-# Multi-stage build for production optimization
-FROM node:18-alpine as builder
+FROM php:8.2-apache
 
-# Install Sharp dependencies for Alpine Linux
-RUN apk add --no-cache \
-    vips-dev \
-    python3 \
-    make \
-    g++ \
-    libc6-compat
+# Instalar dependencias del sistema
+RUN apt-get update && apt-get install -y \
+    libmagickwand-dev \
+    imagemagick \
+    libpng-dev \
+    libjpeg-dev \
+    libfreetype6-dev \
+    libwebp-dev \
+    libavif-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+# Instalar extensiones PHP
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp --with-avif
+RUN docker-php-ext-install gd
+RUN pecl install imagick && docker-php-ext-enable imagick
 
-# Copy backend package files
-COPY backend/package*.json ./backend/
-RUN cd backend && npm ci --only=production
+# Configurar Apache
+RUN a2enmod rewrite
+RUN sed -i 's/upload_max_filesize = 2M/upload_max_filesize = 50M/' /usr/local/etc/php/php.ini-production \
+    && sed -i 's/post_max_size = 8M/post_max_size = 50M/' /usr/local/etc/php/php.ini-production \
+    && sed -i 's/max_execution_time = 30/max_execution_time = 300/' /usr/local/etc/php/php.ini-production \
+    && cp /usr/local/etc/php/php.ini-production /usr/local/etc/php/php.ini
 
-# Copy frontend package files
-COPY package.json package-lock.json ./
-RUN npm ci
+# Crear directorio para imágenes procesadas
+RUN mkdir -p /var/www/html/processed && chown -R www-data:www-data /var/www/html/processed
+RUN mkdir -p /var/www/html/uploads && chown -R www-data:www-data /var/www/html/uploads
 
-# Copy source code
-COPY backend/ ./backend/
-COPY src/ ./src/
-COPY index.html vite.config.ts tsconfig.json tsconfig.app.json tsconfig.node.json ./
-COPY tailwind.config.js postcss.config.js ./
+# Copiar archivos de la aplicación
+COPY . /var/www/html/
 
-# Build frontend
-RUN npm run build
+# Establecer permisos
+RUN chown -R www-data:www-data /var/www/html
+RUN chmod -R 755 /var/www/html
 
-# Production stage
-FROM node:18-alpine
-
-# Install Sharp dependencies for Alpine Linux
-RUN apk add --no-cache vips-dev
-
-WORKDIR /app
-
-# Copy backend and built frontend
-COPY --from=builder /app/backend ./backend
-COPY --from=builder /app/dist ./dist
-
-# Create necessary directories
-RUN mkdir -p backend/uploads backend/processed
-
-# Expose port
-EXPOSE 3001
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3001/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
-
-# Start the application
-WORKDIR /app/backend
-CMD ["node", "server.js"]
+EXPOSE 80

@@ -1,224 +1,156 @@
-# sRGB Image Processor
+# 🎨 Procesador de Imágenes sRGB
 
-A complete web application for processing images with sRGB color profile, designed for easy deployment on EasyPanel and integration with automation tools like n8n, Make, and Zapier.
+Aplicación web PHP para procesar imágenes y aplicar automáticamente el perfil de color sRGB. Perfecta para integrar con herramientas de automatización como n8n, Make, Zapier, etc.
 
-## Features
+## ✨ Características
 
-- **Web Interface**: Upload images via drag-and-drop or file selection
-- **URL Processing**: Process images directly from URLs
-- **REST API**: Complete API for automation integrations
-- **sRGB Conversion**: Automatic conversion to sRGB color profile
-- **Auto Cleanup**: Automatic cleanup of processed files after 1 hour
-- **Docker Ready**: Containerized for easy deployment
+- 🔄 Convierte imágenes al perfil de color sRGB automáticamente
+- 🌐 API REST para integraciones
+- 📤 Interfaz web para subida manual de imágenes
+- 🐳 Fácil despliegue con Docker
+- 📱 Interfaz responsive y moderna
+- 🔒 Configuración de seguridad incluida
 
-## Quick Start with EasyPanel
+## 🚀 Despliegue en EasyPanel
 
-### 1. Deploy to EasyPanel
+### Método 1: Desde GitHub (Recomendado)
 
-1. **Create New Service** in your EasyPanel dashboard
-2. **Choose "Docker Compose"** as the source
-3. **Upload this `docker-compose.yml`** file or copy its contents
-4. **Set Environment Variables** (optional):
-   - `PORT=3001` (default)
-   - `NODE_ENV=production`
-5. **Deploy** the service
+1. **Sube este código a tu repositorio de GitHub**
+2. **En EasyPanel:**
+   - Ve a "Projects" → "Create Project"
+   - Selecciona "GitHub Repository"
+   - Conecta tu repositorio
+   - EasyPanel detectará automáticamente el Dockerfile
 
-### 2. EasyPanel Configuration
+3. **Configuración:**
+   - **Port:** 80
+   - **Domain:** tu-dominio.com (opcional)
+   - Deja las demás configuraciones por defecto
+
+4. **Deploy:** Haz clic en "Deploy"
+
+### Método 2: Docker Compose
+
+1. **Crea un nuevo proyecto en EasyPanel**
+2. **Selecciona "Docker Compose"**
+3. **Pega este docker-compose.yml:**
 
 ```yaml
-# In EasyPanel, use this docker-compose.yml configuration:
 version: '3.8'
 services:
   srgb-processor:
-    image: srgb-image-processor:latest
+    build: .
     ports:
-      - "3001:3001"
-    environment:
-      - NODE_ENV=production
-      - PORT=3001
+      - "80:80"
     volumes:
-      - processed_images:/app/backend/processed
+      - ./processed:/var/www/html/processed
+      - ./uploads:/var/www/html/uploads
     restart: unless-stopped
-
-volumes:
-  processed_images:
 ```
 
-### 3. Manual Docker Build (Alternative)
+## 🔌 Uso de la API
 
-If you prefer to build manually:
-
-```bash
-# Clone and build
-docker build -t srgb-image-processor .
-
-# Run container
-docker run -d \
-  --name srgb-processor \
-  -p 3001:3001 \
-  -v processed_images:/app/backend/processed \
-  srgb-image-processor
+### Endpoint Principal
 ```
-
-## API Endpoints
-
-### Upload Image File
-```bash
-POST /api/upload
-Content-Type: multipart/form-data
-
-# Field name: "image"
-# Returns: { success: true, processedUrl: "...", processedAt: "..." }
-```
-
-### Process Image from URL
-```bash
-POST /api/process-url
+POST http://tu-dominio.com/api.php
 Content-Type: application/json
 
 {
-  "imageUrl": "https://example.com/image.jpg"
+  "image_url": "https://ejemplo.com/imagen.jpg"
 }
-
-# Returns: { success: true, processedUrl: "...", processedAt: "..." }
 ```
 
-### Health Check
-```bash
-GET /health
-# Returns: { status: "OK", timestamp: "..." }
+### Respuesta Exitosa
+```json
+{
+  "success": true,
+  "processed_image_url": "http://tu-dominio.com/processed/imagen_srgb.jpg",
+  "original_url": "https://ejemplo.com/imagen.jpg",
+  "message": "Imagen procesada correctamente"
+}
 ```
 
-## Integration Examples
+## 🛠️ Integraciones
 
-### n8n Integration
+### n8n
+1. Usa el nodo "HTTP Request"
+2. **Method:** POST
+3. **URL:** http://tu-dominio.com/api.php
+4. **Body:** `{"image_url": "{{$json.image_url}}"}`
+5. **Headers:** `Content-Type: application/json`
 
-1. **HTTP Request Node**:
-   - Method: POST
-   - URL: `https://your-domain.com/api/process-url`
-   - Headers: `Content-Type: application/json`
-   - Body: `{ "imageUrl": "{{$json.imageUrl}}" }`
+### Make (Zapier)
+1. Módulo "HTTP Request"
+2. **URL:** http://tu-dominio.com/api.php
+3. **Method:** POST
+4. **Body Type:** JSON
+5. **Body:** `{"image_url": "URL_DE_IMAGEN"}`
 
-2. **Response**: Use `{{$json.processedUrl}}` for the processed image URL
-
-### Make (Integromat) Integration
-
-1. **HTTP Module**:
-   - URL: `https://your-domain.com/api/process-url`
-   - Method: POST
-   - Headers: `Content-Type: application/json`
-   - Body: `{"imageUrl": "{{imageUrl}}"}`
-
-### Zapier Integration
-
-1. **Webhooks by Zapier**:
-   - Event: POST
-   - URL: `https://your-domain.com/api/process-url`
-   - Payload Type: JSON
-   - Data: `{"imageUrl": "{{inputData.imageUrl}}"}`
-
-### cURL Example
-
+### cURL Ejemplo
 ```bash
-# Process image from URL
-curl -X POST https://your-domain.com/api/process-url \
+curl -X POST http://tu-dominio.com/api.php \
   -H "Content-Type: application/json" \
-  -d '{"imageUrl": "https://example.com/image.jpg"}'
-
-# Upload file
-curl -X POST https://your-domain.com/api/upload \
-  -F "image=@/path/to/your/image.jpg"
+  -d '{"image_url": "https://ejemplo.com/imagen.jpg"}'
 ```
 
-## Technical Details
+## 📁 Estructura del Proyecto
 
-### Supported Image Formats
-- JPEG/JPG
-- PNG
-- WebP
-- TIFF
-
-### File Size Limits
-- Maximum upload: 10MB per image
-- Auto cleanup: Files older than 1 hour are automatically removed
-
-### sRGB Processing
-- Uses Sharp library for high-quality image processing
-- Converts images to sRGB color space
-- Maintains 95% JPEG quality for optimal balance
-
-### Security Features
-- File type validation
-- File size limits
-- Input sanitization
-- CORS enabled for web integrations
-
-## Environment Variables
-
-- `PORT`: Server port (default: 3001)
-- `NODE_ENV`: Environment mode (production/development)
-
-## Monitoring
-
-The application includes:
-- Health check endpoint at `/health`
-- Docker health check configuration
-- Automatic file cleanup logging
-- Error handling and logging
-
-## Troubleshooting
-
-### Common Issues
-
-1. **"Sharp installation failed"**:
-   - The Docker image includes proper Sharp dependencies for Alpine Linux
-   - If building locally, ensure you have the required system dependencies
-
-2. **"Failed to process image"**:
-   - Check that the image URL is publicly accessible
-   - Verify the image format is supported
-   - Check file size limits
-
-3. **"API not responding"**:
-   - Verify the container is running: `docker ps`
-   - Check health endpoint: `curl http://your-domain.com/health`
-
-### Logs
-
-```bash
-# View container logs
-docker logs srgb-processor
-
-# Follow logs in real-time
-docker logs -f srgb-processor
+```
+/
+├── Dockerfile              # Configuración Docker
+├── docker-compose.yml      # Compose para desarrollo local
+├── index.php              # Interfaz web principal
+├── api.php                # API REST para automatización
+├── upload.php             # Manejo de uploads directos
+├── .htaccess             # Configuración Apache
+├── processed/            # Imágenes procesadas (creado automáticamente)
+└── uploads/              # Uploads temporales (creado automáticamente)
 ```
 
-## Development
+## 🔧 Características Técnicas
 
-### Local Development
+- **PHP 8.2** con ImageMagick y GD
+- **Apache** con mod_rewrite habilitado
+- **Formatos soportados:** JPEG, PNG, WebP, AVIF
+- **Límite de archivo:** 50MB
+- **Tiempo de ejecución:** 5 minutos máximo
+- **Perfil de color:** sRGB automático
 
-```bash
-# Install dependencies
-npm install
-cd backend && npm install
+## 🛡️ Seguridad
 
-# Start backend (in backend directory)
-npm run dev
+- Headers de seguridad configurados
+- Validación de tipos de archivo
+- Protección contra XSS
+- Límites de subida configurados
+- CORS configurado para APIs
 
-# Start frontend (in root directory)
-npm run dev
-```
+## 📊 Monitoreo
 
-### Build for Production
+- Logs de Apache disponibles en EasyPanel
+- Métricas de uso en el dashboard
+- Estado de la aplicación visible
 
-```bash
-# Build Docker image
-docker build -t srgb-image-processor .
+## ❓ Solución de Problemas
 
-# Or use docker-compose
-docker-compose up --build
-```
+### Error: "ImageMagick no disponible"
+- Verifica que el container se haya construido correctamente
+- Revisa los logs en EasyPanel
 
-## License
+### Error: "No se pudo descargar imagen"
+- Verifica que la URL sea accesible públicamente
+- La imagen debe estar en formato soportado
 
-MIT License - feel free to use this in your projects!
+### Error 413: "Archivo muy grande"
+- El límite actual es 50MB
+- Para archivos más grandes, modifica el Dockerfile
+
+## 📞 Soporte
+
+Si tienes problemas:
+1. Revisa los logs en EasyPanel
+2. Verifica que el dominio esté correctamente configurado
+3. Prueba la API con curl primero
+
+---
+
+¡Tu procesador de imágenes sRGB está listo para usar! 🎉
