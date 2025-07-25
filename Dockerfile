@@ -22,7 +22,6 @@ RUN npm ci
 # Copy source code
 COPY backend/ ./backend/
 COPY src/ ./src/
-COPY public/ ./public/
 COPY index.html vite.config.ts tsconfig.json tsconfig.app.json tsconfig.node.json ./
 COPY tailwind.config.js postcss.config.js ./
 
