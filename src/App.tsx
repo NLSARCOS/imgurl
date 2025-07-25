@@ -1,563 +1,376 @@
 import React, { useState, useRef } from 'react';
-import { Upload, Download, Image as ImageIcon, CheckCircle, Link, Code } from 'lucide-react';
+import { Upload, Download, Image as ImageIcon, CheckCircle, AlertCircle, Loader2, Copy, ExternalLink } from 'lucide-react';
 
 interface ProcessedImage {
-  original: string;
-  processed: string;
-  filename: string;
+  originalName?: string;
+  originalUrl?: string;
+  processedUrl: string;
+  processedAt: string;
+  success: boolean;
 }
 
 function App() {
-  const [processedImage, setProcessedImage] = useState<ProcessedImage | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isDragOver, setIsDragOver] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [processedImages, setProcessedImages] = useState<ProcessedImage[]>([]);
+  const [urlInput, setUrlInput] = useState('');
+  const [processingUrl, setProcessingUrl] = useState(false);
   const [activeTab, setActiveTab] = useState<'upload' | 'url' | 'api'>('upload');
-  const [imageUrl, setImageUrl] = useState('');
-  const [isProcessingUrl, setIsProcessingUrl] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const applySRGBProfile = (canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, img: HTMLImageElement) => {
-    // Dibujar la imagen en el canvas
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    
-    // Obtener los datos de la imagen
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imageData.data;
-    
-    // Aplicar corrección gamma sRGB (aproximación)
-    for (let i = 0; i < data.length; i += 4) {
-      // Convertir a valores normalizados (0-1)
-      let r = data[i] / 255;
-      let g = data[i + 1] / 255;
-      let b = data[i + 2] / 255;
-      
-      // Aplicar función de transferencia sRGB inversa y luego directa
-      // Esto simula la conversión al espacio sRGB
-      const applySRGBGamma = (val: number) => {
-        if (val <= 0.04045) {
-          return val / 12.92;
-        } else {
-          return Math.pow((val + 0.055) / 1.055, 2.4);
-        }
-      };
-      
-      const linearToSRGB = (val: number) => {
-        if (val <= 0.0031308) {
-          return val * 12.92;
-        } else {
-          return 1.055 * Math.pow(val, 1 / 2.4) - 0.055;
-        }
-      };
-      
-      // Convertir a lineal y de vuelta a sRGB para normalizar
-      r = linearToSRGB(applySRGBGamma(r));
-      g = linearToSRGB(applySRGBGamma(g));
-      b = linearToSRGB(applySRGBGamma(b));
-      
-      // Aplicar ligera mejora de contraste y saturación
-      const enhance = (val: number) => {
-        val = Math.pow(val, 0.95); // Ligero ajuste de gamma
-        return Math.max(0, Math.min(1, val));
-      };
-      
-      r = enhance(r);
-      g = enhance(g);
-      b = enhance(b);
-      
-      // Convertir de vuelta a 0-255
-      data[i] = Math.round(r * 255);
-      data[i + 1] = Math.round(g * 255);
-      data[i + 2] = Math.round(b * 255);
-    }
-    
-    // Aplicar los datos modificados al canvas
-    ctx.putImageData(imageData, 0, 0);
-  };
+  const API_BASE = process.env.NODE_ENV === 'production' 
+    ? window.location.origin 
+    : 'http://localhost:3001';
 
-  const processImage = async (file: File) => {
-    setIsProcessing(true);
-    
-    const img = new Image();
-    const originalUrl = URL.createObjectURL(file);
-    
-    img.onload = () => {
-      const canvas = canvasRef.current!;
-      const ctx = canvas.getContext('2d')!;
-      
-      // Configurar el canvas con las dimensiones de la imagen
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      
-      // Aplicar el perfil sRGB
-      applySRGBProfile(canvas, ctx, img);
-      
-      // Convertir a blob y crear URL
-      canvas.toBlob((blob) => {
-        if (blob) {
-          const processedUrl = URL.createObjectURL(blob);
-          
-          setProcessedImage({
-            original: originalUrl,
-            processed: processedUrl,
-            filename: file.name
-          });
-        }
-        setIsProcessing(false);
-      }, 'image/jpeg', 0.95);
-    };
-    
-    img.src = originalUrl;
-  };
-
-  const processImageFromUrl = async () => {
-    if (!imageUrl.trim()) return;
-    
-    setIsProcessingUrl(true);
-    
-    try {
-      const response = await fetch('/api/process-image', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          imageUrl: imageUrl.trim(),
-          format: 'jpeg',
-          quality: 0.95
-        })
-      });
-      
-      const result = await response.json();
-      
-      if (result.success) {
-        setProcessedImage({
-          original: imageUrl,
-          processed: result.processedImageBase64,
-          filename: 'processed_image_from_url.jpg'
-        });
-      } else {
-        alert(`Error: ${result.error}`);
-      }
-    } catch (error) {
-      alert(`Error procesando imagen: ${error}`);
-    } finally {
-      setIsProcessingUrl(false);
-    }
-  };
-
-  const handleFileSelect = (file: File) => {
-    if (file && file.type.startsWith('image/')) {
-      processImage(file);
-    }
-  };
-
-  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      handleFileSelect(file);
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === 'dragenter' || e.type === 'dragover') {
+      setDragActive(true);
+    } else if (e.type === 'dragleave') {
+      setDragActive(false);
     }
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    setIsDragOver(false);
+    e.stopPropagation();
+    setDragActive(false);
     
-    const file = e.dataTransfer.files[0];
-    if (file) {
-      handleFileSelect(file);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleFiles(e.dataTransfer.files);
     }
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     e.preventDefault();
-    setIsDragOver(true);
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(false);
-  };
-
-  const downloadImage = () => {
-    if (processedImage) {
-      const link = document.createElement('a');
-      link.href = processedImage.processed;
-      const filename = processedImage.filename.replace(/\.[^/.]+$/, '') + '_sRGB.jpg';
-      link.download = filename;
-      link.click();
+    if (e.target.files && e.target.files[0]) {
+      handleFiles(e.target.files);
     }
   };
 
-  const reset = () => {
-    setProcessedImage(null);
-    setImageUrl('');
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+  const handleFiles = async (files: FileList) => {
+    const file = files[0];
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file');
+      return;
     }
+
+    setProcessing(true);
+    const formData = new FormData();
+    formData.append('image', file);
+
+    try {
+      const response = await fetch(`${API_BASE}/api/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      const result = await response.json();
+      
+      if (response.ok) {
+        setProcessedImages(prev => [result, ...prev]);
+      } else {
+        alert(result.error || 'Failed to process image');
+      }
+    } catch (error) {
+      console.error('Upload error:', error);
+      alert('Failed to upload image');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const processUrlImage = async () => {
+    if (!urlInput.trim()) {
+      alert('Please enter an image URL');
+      return;
+    }
+
+    setProcessingUrl(true);
+    
+    try {
+      const response = await fetch(`${API_BASE}/api/process-url`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ imageUrl: urlInput }),
+      });
+
+      const result = await response.json();
+      
+      if (response.ok) {
+        setProcessedImages(prev => [result, ...prev]);
+        setUrlInput('');
+      } else {
+        alert(result.error || 'Failed to process image');
+      }
+    } catch (error) {
+      console.error('URL processing error:', error);
+      alert('Failed to process image from URL');
+    } finally {
+      setProcessingUrl(false);
+    }
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    // You could add a toast notification here
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 py-8 px-4">
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-12">
-          <div className="flex items-center justify-center mb-4">
-            <ImageIcon className="w-12 h-12 text-blue-600 mr-3" />
-            <h1 className="text-4xl font-bold text-slate-800">Conversor sRGB Pro</h1>
-          </div>
-          <p className="text-slate-600 text-lg">
-            Procesa imágenes aplicando perfil de color sRGB - Subida directa, URL o API
-          </p>
-        </div>
-
-        {/* Tabs */}
-        <div className="bg-white rounded-2xl shadow-lg mb-8 overflow-hidden">
-          <div className="flex border-b border-slate-200">
-            <button
-              onClick={() => setActiveTab('upload')}
-              className={`flex-1 px-6 py-4 text-center font-semibold transition-colors duration-200 ${
-                activeTab === 'upload'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              <Upload className="w-5 h-5 inline mr-2" />
-              Subir Archivo
-            </button>
-            <button
-              onClick={() => setActiveTab('url')}
-              className={`flex-1 px-6 py-4 text-center font-semibold transition-colors duration-200 ${
-                activeTab === 'url'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              <Link className="w-5 h-5 inline mr-2" />
-              Desde URL
-            </button>
-            <button
-              onClick={() => setActiveTab('api')}
-              className={`flex-1 px-6 py-4 text-center font-semibold transition-colors duration-200 ${
-                activeTab === 'api'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              <Code className="w-5 h-5 inline mr-2" />
-              Documentación API
-            </button>
-          </div>
-        </div>
-
-        {/* Upload Area */}
-        {activeTab === 'upload' && !processedImage && !isProcessing && (
-          <div className="bg-white rounded-2xl shadow-lg p-8 mb-8">
-            <div
-              className={`border-3 border-dashed rounded-xl p-12 text-center transition-all duration-300 cursor-pointer ${
-                isDragOver
-                  ? 'border-blue-500 bg-blue-50 transform scale-105'
-                  : 'border-slate-300 hover:border-blue-400 hover:bg-slate-50'
-              }`}
-              onDrop={handleDrop}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <Upload className="w-16 h-16 mx-auto mb-4 text-slate-400" />
-              <h3 className="text-xl font-semibold text-slate-700 mb-2">
-                Arrastra tu imagen aquí
-              </h3>
-              <p className="text-slate-500 mb-4">
-                o haz click para seleccionar un archivo
-              </p>
-              <div className="inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200">
-                <Upload className="w-5 h-5 mr-2" />
-                Seleccionar Imagen
-              </div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b">
+        <div className="max-w-6xl mx-auto px-4 py-6">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-indigo-100 rounded-lg">
+              <ImageIcon className="w-6 h-6 text-indigo-600" />
             </div>
-            
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleFileInput}
-              className="hidden"
-            />
-          </div>
-        )}
-
-        {/* URL Input */}
-        {activeTab === 'url' && !processedImage && !isProcessingUrl && (
-          <div className="bg-white rounded-2xl shadow-lg p-8 mb-8">
-            <div className="text-center mb-6">
-              <Link className="w-16 h-16 mx-auto mb-4 text-slate-400" />
-              <h3 className="text-xl font-semibold text-slate-700 mb-2">
-                Procesar imagen desde URL
-              </h3>
-              <p className="text-slate-500">
-                Ingresa la URL de una imagen para procesarla automáticamente
-              </p>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">sRGB Image Processor</h1>
+              <p className="text-gray-600">Convert images to sRGB color profile for consistent color reproduction</p>
             </div>
-            
-            <div className="max-w-2xl mx-auto">
-              <div className="flex gap-4">
-                <input
-                  type="url"
-                  value={imageUrl}
-                  onChange={(e) => setImageUrl(e.target.value)}
-                  placeholder="https://ejemplo.com/imagen.jpg"
-                  className="flex-1 px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                />
-                <button
-                  onClick={processImageFromUrl}
-                  disabled={!imageUrl.trim()}
-                  className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors duration-200 font-semibold"
-                >
-                  Procesar
-                </button>
-              </div>
-              
-              <p className="text-sm text-slate-500 mt-3 text-center">
-                Formatos soportados: JPG, PNG, GIF, WebP
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* API Documentation */}
-        {activeTab === 'api' && (
-          <div className="bg-white rounded-2xl shadow-lg p-8 mb-8">
-            <div className="max-w-4xl mx-auto">
-              <div className="text-center mb-8">
-                <Code className="w-16 h-16 mx-auto mb-4 text-slate-400" />
-                <h3 className="text-2xl font-semibold text-slate-700 mb-2">
-                  Documentación de la API
-                </h3>
-                <p className="text-slate-500">
-                  Integra el procesamiento sRGB en tus aplicaciones
-                </p>
-              </div>
-
-              <div className="space-y-8">
-                {/* Endpoint */}
-                <div>
-                  <h4 className="text-lg font-semibold text-slate-700 mb-3">Endpoint</h4>
-                  <div className="bg-slate-100 rounded-lg p-4 font-mono text-sm">
-                    <span className="text-green-600 font-bold">POST</span> /api/process-image
-                  </div>
-                </div>
-
-                {/* Request */}
-                <div>
-                  <h4 className="text-lg font-semibold text-slate-700 mb-3">Parámetros de Entrada</h4>
-                  <div className="bg-slate-900 text-slate-100 rounded-lg p-4 overflow-x-auto">
-                    <pre className="text-sm">{`{
-  "imageUrl": "https://ejemplo.com/imagen.jpg",    // Requerido
-  "format": "jpeg",                                // Opcional: "jpeg" | "png"
-  "quality": 0.95                                  // Opcional: 0.1 - 1.0
-}`}</pre>
-                  </div>
-                </div>
-
-                {/* Response */}
-                <div>
-                  <h4 className="text-lg font-semibold text-slate-700 mb-3">Respuesta</h4>
-                  <div className="bg-slate-900 text-slate-100 rounded-lg p-4 overflow-x-auto">
-                    <pre className="text-sm">{`{
-  "success": true,
-  "processedImageBase64": "data:image/jpeg;base64,/9j/4AAQ...",
-  "originalSize": 245760,
-  "processedSize": 198432
-}`}</pre>
-                  </div>
-                </div>
-
-                {/* Example */}
-                <div>
-                  <h4 className="text-lg font-semibold text-slate-700 mb-3">Ejemplo de Uso</h4>
-                  <div className="bg-slate-900 text-slate-100 rounded-lg p-4 overflow-x-auto">
-                    <pre className="text-sm">{`// Ejemplo con tu servidor
-const response = await fetch('/api/process-image', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({
-    imageUrl: 'https://ejemplo.com/imagen.jpg',
-    format: 'jpeg',
-    quality: 0.95
-  })
-});
-
-const result = await response.json();
-
-if (result.success) {
-  // Usar result.processedImageBase64
-  const img = document.createElement('img');
-  img.src = result.processedImageBase64;
-  document.body.appendChild(img);
-} else {
-  console.error('Error:', result.error);
-}`}</pre>
-                  </div>
-                </div>
-
-                {/* cURL Example */}
-                <div>
-                  <h4 className="text-lg font-semibold text-slate-700 mb-3">Ejemplo con cURL</h4>
-                  <div className="bg-slate-900 text-slate-100 rounded-lg p-4 overflow-x-auto">
-                    <pre className="text-sm">{`curl -X POST /api/process-image \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "imageUrl": "https://ejemplo.com/imagen.jpg",
-    "format": "jpeg",
-    "quality": 0.95
-  }'`}</pre>
-                  </div>
-                </div>
-
-                {/* Error Codes */}
-                <div>
-                  <h4 className="text-lg font-semibold text-slate-700 mb-3">Códigos de Error</h4>
-                  <div className="bg-slate-50 rounded-lg p-4">
-                    <div className="space-y-2 text-sm">
-                      <div><span className="font-mono bg-red-100 text-red-800 px-2 py-1 rounded">400</span> - Parámetros inválidos o URL no válida</div>
-                      <div><span className="font-mono bg-red-100 text-red-800 px-2 py-1 rounded">405</span> - Método no permitido (solo POST)</div>
-                      <div><span className="font-mono bg-red-100 text-red-800 px-2 py-1 rounded">500</span> - Error interno del servidor</div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Rate Limits */}
-                <div>
-                  <h4 className="text-lg font-semibold text-slate-700 mb-3">Limitaciones</h4>
-                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                    <ul className="text-sm text-yellow-800 space-y-1">
-                      <li>• Tamaño máximo de imagen: 10MB</li>
-                      <li>• Formatos soportados: JPG, PNG, GIF, WebP</li>
-                      <li>• Tiempo de procesamiento: ~2-5 segundos</li>
-                      <li>• La imagen se retorna como base64 en la respuesta</li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Processing State */}
-        {(isProcessing || isProcessingUrl) && (
-          <div className="bg-white rounded-2xl shadow-lg p-12 text-center mb-8">
-            <div className="animate-spin w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
-            <h3 className="text-xl font-semibold text-slate-700 mb-2">
-              Procesando imagen...
-            </h3>
-            <p className="text-slate-500">
-              {isProcessingUrl ? 'Descargando y procesando imagen desde URL' : 'Aplicando perfil de color sRGB'}
-            </p>
-          </div>
-        )}
-
-        {/* Results */}
-        {processedImage && (
-          <div className="bg-white rounded-2xl shadow-lg overflow-hidden mb-8">
-            {/* Success Header */}
-            <div className="bg-green-50 border-b border-green-200 p-6">
-              <div className="flex items-center justify-center">
-                <CheckCircle className="w-8 h-8 text-green-600 mr-3" />
-                <div>
-                  <h3 className="text-xl font-semibold text-green-800">
-                    ¡Procesamiento Completado!
-                  </h3>
-                  <p className="text-green-600">
-                    Perfil sRGB aplicado correctamente
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Images Comparison */}
-            <div className="p-8">
-              <div className="grid md:grid-cols-2 gap-8">
-                {/* Original */}
-                <div>
-                  <h4 className="text-lg font-semibold text-slate-700 mb-4">
-                    Imagen Original
-                  </h4>
-                  <div className="bg-slate-100 rounded-lg overflow-hidden">
-                    <img
-                      src={processedImage.original}
-                      alt="Original"
-                      className="w-full h-auto max-h-80 object-contain"
-                    />
-                  </div>
-                </div>
-
-                {/* Processed */}
-                <div>
-                  <h4 className="text-lg font-semibold text-slate-700 mb-4">
-                    Con Perfil sRGB
-                  </h4>
-                  <div className="bg-slate-100 rounded-lg overflow-hidden">
-                    <img
-                      src={processedImage.processed}
-                      alt="Processed"
-                      className="w-full h-auto max-h-80 object-contain"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex flex-col sm:flex-row gap-4 mt-8 justify-center">
-                <button
-                  onClick={downloadImage}
-                  className="inline-flex items-center px-8 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200 font-semibold text-lg"
-                >
-                  <Download className="w-6 h-6 mr-3" />
-                  Descargar Imagen sRGB
-                </button>
-                
-                <button
-                  onClick={reset}
-                  className="inline-flex items-center px-8 py-4 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors duration-200 font-semibold text-lg"
-                >
-                  <Upload className="w-6 h-6 mr-3" />
-                  Procesar Otra Imagen
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Info */}
-        <div className="bg-white rounded-2xl shadow-lg p-8">
-          <h3 className="text-xl font-semibold text-slate-700 mb-4">
-            Características de la Aplicación
-          </h3>
-          <div className="space-y-3 text-slate-600">
-            <p>
-              • <strong>Subida directa:</strong> Arrastra y suelta archivos o selecciona desde tu dispositivo
-            </p>
-            <p>
-              • <strong>Procesamiento por URL:</strong> Procesa imágenes directamente desde enlaces web
-            </p>
-            <p>
-              • <strong>API REST:</strong> Integra el procesamiento sRGB en tus aplicaciones
-            </p>
-            <p>
-              • <strong>Perfil sRGB automático:</strong> Normaliza colores para visualización web consistente
-            </p>
-            <p>
-              • <strong>Múltiples formatos:</strong> Soporta JPG, PNG, GIF y WebP
-            </p>
           </div>
         </div>
       </div>
 
-      {/* Hidden Canvas */}
-      <canvas ref={canvasRef} className="hidden" />
+      <div className="max-w-6xl mx-auto px-4 py-8">
+        {/* Tabs */}
+        <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg mb-8 w-fit">
+          {[
+            { id: 'upload', label: 'Upload Image', icon: Upload },
+            { id: 'url', label: 'Process URL', icon: ExternalLink },
+            { id: 'api', label: 'API Documentation', icon: CheckCircle }
+          ].map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id as any)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-all ${
+                activeTab === id
+                  ? 'bg-white text-indigo-600 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Left Column - Input */}
+          <div className="space-y-6">
+            {activeTab === 'upload' && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Upload Image</h2>
+                
+                <div
+                  className={`relative border-2 border-dashed rounded-lg p-8 text-center transition-all ${
+                    dragActive
+                      ? 'border-indigo-400 bg-indigo-50'
+                      : 'border-gray-300 hover:border-gray-400'
+                  }`}
+                  onDragEnter={handleDrag}
+                  onDragLeave={handleDrag}
+                  onDragOver={handleDrag}
+                  onDrop={handleDrop}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleChange}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    disabled={processing}
+                  />
+                  
+                  {processing ? (
+                    <div className="flex flex-col items-center gap-3">
+                      <Loader2 className="w-8 h-8 text-indigo-600 animate-spin" />
+                      <p className="text-gray-600">Processing image...</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-3">
+                      <Upload className="w-8 h-8 text-gray-400" />
+                      <div>
+                        <p className="text-gray-600">
+                          <span className="font-medium text-indigo-600">Click to upload</span> or drag and drop
+                        </p>
+                        <p className="text-sm text-gray-500 mt-1">PNG, JPG, WEBP, TIFF up to 10MB</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'url' && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Process Image from URL</h2>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Image URL
+                    </label>
+                    <input
+                      type="url"
+                      value={urlInput}
+                      onChange={(e) => setUrlInput(e.target.value)}
+                      placeholder="https://example.com/image.jpg"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      disabled={processingUrl}
+                    />
+                  </div>
+                  
+                  <button
+                    onClick={processUrlImage}
+                    disabled={processingUrl || !urlInput.trim()}
+                    className="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                  >
+                    {processingUrl ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      <>
+                        <ExternalLink className="w-4 h-4" />
+                        Process Image
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'api' && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">API Documentation</h2>
+                
+                <div className="space-y-6">
+                  <div>
+                    <h3 className="font-medium text-gray-900 mb-2">Upload Image</h3>
+                    <div className="bg-gray-50 rounded-md p-3 text-sm font-mono">
+                      <div className="text-blue-600">POST</div>
+                      <div className="text-gray-800">{API_BASE}/api/upload</div>
+                    </div>
+                    <p className="text-sm text-gray-600 mt-2">
+                      Upload image file using multipart/form-data with field name "image"
+                    </p>
+                  </div>
+
+                  <div>
+                    <h3 className="font-medium text-gray-900 mb-2">Process URL</h3>
+                    <div className="bg-gray-50 rounded-md p-3 text-sm font-mono">
+                      <div className="text-blue-600">POST</div>
+                      <div className="text-gray-800">{API_BASE}/api/process-url</div>
+                    </div>
+                    <div className="bg-gray-50 rounded-md p-3 text-sm font-mono mt-2">
+                      {`{
+  "imageUrl": "https://example.com/image.jpg"
+}`}
+                    </div>
+                    <p className="text-sm text-gray-600 mt-2">
+                      Send JSON with imageUrl field pointing to a publicly accessible image
+                    </p>
+                  </div>
+
+                  <div>
+                    <h3 className="font-medium text-gray-900 mb-2">Response Format</h3>
+                    <div className="bg-gray-50 rounded-md p-3 text-sm font-mono">
+                      {`{
+  "success": true,
+  "message": "Image processed successfully",
+  "processedUrl": "https://your-domain.com/processed/srgb-image.jpg",
+  "processedAt": "2025-01-11T..."
+}`}
+                    </div>
+                  </div>
+
+                  <div className="bg-amber-50 border border-amber-200 rounded-md p-4">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5" />
+                      <div>
+                        <h4 className="font-medium text-amber-900">Integration Note</h4>
+                        <p className="text-sm text-amber-800 mt-1">
+                          For n8n, Make, or Zapier integrations, use the process-url endpoint with a POST request containing the imageUrl in JSON format.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Right Column - Results */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Processed Images</h2>
+            
+            {processedImages.length === 0 ? (
+              <div className="text-center py-12 text-gray-500">
+                <ImageIcon className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                <p>No images processed yet</p>
+                <p className="text-sm">Upload an image or process a URL to get started</p>
+              </div>
+            ) : (
+              <div className="space-y-4 max-h-96 overflow-y-auto">
+                {processedImages.map((image, index) => (
+                  <div key={index} className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle className="w-5 h-5 text-green-600" />
+                        <span className="font-medium text-gray-900">Processing Complete</span>
+                      </div>
+                      <span className="text-xs text-gray-500">
+                        {new Date(image.processedAt).toLocaleString()}
+                      </span>
+                    </div>
+                    
+                    {image.originalName && (
+                      <p className="text-sm text-gray-600 mb-2">
+                        <span className="font-medium">Original:</span> {image.originalName}
+                      </p>
+                    )}
+                    
+                    {image.originalUrl && (
+                      <p className="text-sm text-gray-600 mb-2">
+                        <span className="font-medium">Source URL:</span> 
+                        <a href={image.originalUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline ml-1 break-all">
+                          {image.originalUrl}
+                        </a>
+                      </p>
+                    )}
+                    
+                    <div className="flex items-center gap-2 mt-3">
+                      <button
+                        onClick={() => copyToClipboard(image.processedUrl)}
+                        className="flex items-center gap-1 px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                      >
+                        <Copy className="w-3 h-3" />
+                        Copy URL
+                      </button>
+                      
+                      <a
+                        href={image.processedUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 px-3 py-1 text-sm bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-md transition-colors"
+                      >
+                        <Download className="w-3 h-3" />
+                        Download
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
